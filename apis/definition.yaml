@@ -76,7 +76,7 @@ spec:
                           description: The unique number identifier for your GCP project.
                         workloadIdentityPoolName:
                           type: string
-                          description: The name of the Workload Identity Pool in GCP. This is used to federate identities between your AWS and GCP.
+                          description: The name of the Workload Identity Pool in GCP. This is used to federate identities between your Azure and GCP.
                         serviceAccountName:
                           type: string
                           description: The name of the GCP service account that will be impersonated.
