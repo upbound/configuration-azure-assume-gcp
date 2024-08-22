@@ -1,0 +1,408 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xaks.azure.platform.upbound.io
+  labels:
+    provider: azure
+spec:
+  compositeTypeRef:
+    apiVersion: azure.platform.upbound.io/v1alpha1
+    kind: XAKS
+  mode: Pipeline
+  pipeline:
+    - step: patch-and-transform
+      functionRef:
+        name: crossplane-contrib-function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          - name: providerConfigRef
+            patches:
+              - fromFieldPath: spec.parameters.providerConfigName
+                toFieldPath: spec.providerConfigRef.name
+                type: FromCompositeFieldPath
+          - name: deletionPolicy
+            patches:
+              - fromFieldPath: spec.parameters.deletionPolicy
+                toFieldPath: spec.deletionPolicy
+                type: FromCompositeFieldPath
+          - name: region
+            patches:
+              - fromFieldPath: spec.parameters.region
+                toFieldPath: spec.forProvider.location
+                type: FromCompositeFieldPath
+        resources:
+          - name: kubernetesCluster
+            base:
+              apiVersion: containerservice.azure.upbound.io/v1beta1
+              kind: KubernetesCluster
+              spec:
+                forProvider:
+                  defaultNodePool:
+                    - name: default
+                  identity:
+                    - type: SystemAssigned
+                  oidcIssuerEnabled: true
+                  workloadIdentityEnabled: true
+            connectionDetails:
+              - fromConnectionSecretKey: kubeconfig
+                name: kubeconfig
+                type: FromConnectionSecretKey
+            patches:
+              - type: PatchSet
+                patchSetName: providerConfigRef
+              - type: PatchSet
+                patchSetName: deletionPolicy
+              - type: PatchSet
+                patchSetName: region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.version
+                toFieldPath: spec.forProvider.kubernetesVersion
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.id
+                toFieldPath: metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      fmt: '%s-aks'
+                      type: Format
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.id
+                toFieldPath: spec.forProvider.resourceGroupNameSelector.matchLabels[azure.platform.upbound.io/network-id]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.id
+                toFieldPath: spec.forProvider.defaultNodePool[0].vnetSubnetIdSelector.matchLabels[azure.platform.upbound.io/network-id]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.id
+                toFieldPath: spec.forProvider.dnsPrefix
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.nodes.instanceType
+                toFieldPath: spec.forProvider.defaultNodePool[0].vmSize
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.nodes.count
+                toFieldPath: spec.forProvider.defaultNodePool[0].nodeCount
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.writeConnectionSecretToRef.namespace
+                toFieldPath: spec.writeConnectionSecretToRef.namespace
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.uid
+                toFieldPath: spec.writeConnectionSecretToRef.name
+                transforms:
+                  - type: string
+                    string:
+                      fmt: '%s-akscluster'
+                      type: Format
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.oidcIssuerUrl
+                toFieldPath: status.aks.oidcIssuerUrl
+                policy:
+                  fromFieldPath: Optional
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.oidcIssuerUrl
+                toFieldPath: status.aks.oidcIssuerUrl
+                policy:
+                  fromFieldPath: Optional
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.oidcIssuerUrl
+                toFieldPath: status.aks.oidcIssuerUri
+                transforms:
+                  - string:
+                      trim: https://
+                      type: TrimPrefix
+                    type: string
+                policy:
+                  fromFieldPath: Optional
+
+          - name: providerConfigHelm
+            base:
+              apiVersion: helm.crossplane.io/v1beta1
+              kind: ProviderConfig
+              spec:
+                credentials:
+                  secretRef:
+                    key: kubeconfig
+                  source: Secret
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.id
+                toFieldPath: metadata.name
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.writeConnectionSecretToRef.namespace
+                toFieldPath: spec.credentials.secretRef.namespace
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.uid
+                toFieldPath: spec.credentials.secretRef.name
+                transforms:
+                  - type: string
+                    string:
+                      fmt: '%s-akscluster'
+                      type: Format
+            readinessChecks:
+              - type: None
+
+          - name: providerConfigKubernetes
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha1
+              kind: ProviderConfig
+              spec:
+                credentials:
+                  secretRef:
+                    key: kubeconfig
+                  source: Secret
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.id
+                toFieldPath: metadata.name
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.writeConnectionSecretToRef.namespace
+                toFieldPath: spec.credentials.secretRef.namespace
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.uid
+                toFieldPath: spec.credentials.secretRef.name
+                transforms:
+                  - type: string
+                    string:
+                      fmt: '%s-akscluster'
+                      type: Format
+            readinessChecks:
+              - type: None
+
+          - name: crossplane
+            base:
+              apiVersion: helm.crossplane.io/v1beta1
+              kind: Release
+              spec:
+                rollbackLimit: 3
+                forProvider:
+                  namespace: upbound-system
+                  chart:
+                    name: universal-crossplane
+                    repository: https://charts.upbound.io/stable
+                    version: "1.16.0-up.1"
+                  values: {}
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.id
+                toFieldPath: spec.providerConfigRef.name
+
+          - name: provider
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                forProvider:
+                  manifest:
+                    apiVersion: pkg.crossplane.io/v1
+                    kind: Provider
+                    metadata:
+                      name: upbound-provider-gcp-compute
+                    spec:
+                      package: xpkg.upbound.io/upbound/provider-gcp-compute:v1.6.0
+                      runtimeConfigRef:
+                        apiVersion: pkg.crossplane.io/v1beta1
+                        kind: DeploymentRuntimeConfig
+                        name: upbound-provider-gcp-compute
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.id
+                toFieldPath: spec.providerConfigRef.name
+
+          - name: drc
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                forProvider:
+                  manifest:
+                    apiVersion: pkg.crossplane.io/v1beta1
+                    kind: DeploymentRuntimeConfig
+                    metadata:
+                      name: upbound-provider-gcp-compute
+                    spec:
+                      serviceAccountTemplate:
+                        metadata:
+                          name: upbound-provider-gcp-compute
+                          annotations:
+                            azure.workload.identity/client-id: "upbound-provider-gcp-compute"
+                      deploymentTemplate:
+                        spec:
+                          selector: {}
+                          replicas: 1
+                          template:
+                            metadata:
+                              labels:
+                                azure.workload.identity/use: "true"
+                            spec:
+                              containers:
+                                - name: package-runtime
+                                  env:
+                                    - name: GOOGLE_APPLICATION_CREDENTIALS
+                                      value: /tmp/gcp_default_credentials.json
+                                  volumeMounts:
+                                    - mountPath: /tmp/
+                                      name: gcp
+                              volumes:
+                                - name: gcp
+                                  configMap:
+                                    name: gcp-default-credentials
+                                    items:
+                                      - key: gcp_default_credentials.json
+                                        path: gcp_default_credentials.json
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.id
+                toFieldPath: spec.providerConfigRef.name
+
+          - name: user-assigned-identity
+            base:
+              apiVersion: managedidentity.azure.upbound.io/v1beta1
+              kind: UserAssignedIdentity
+              spec:
+                forProvider:
+                  name: upbound-provider-gcp-compute
+            patches:
+              - type: PatchSet
+                patchSetName: providerConfigRef
+              - type: PatchSet
+                patchSetName: deletionPolicy
+              - type: PatchSet
+                patchSetName: region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.id
+                toFieldPath: spec.forProvider.resourceGroupNameSelector.matchLabels[azure.platform.upbound.io/network-id]
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.id
+                toFieldPath: status.aks.userAssignedIdentityId
+                policy:
+                  fromFieldPath: Optional
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.principalId
+                toFieldPath: status.aks.userAssignedIdentitiyObjectId
+                policy:
+                  fromFieldPath: Optional
+
+          - name: federated-identity-credential
+            base:
+              apiVersion: managedidentity.azure.upbound.io/v1beta1
+              kind: FederatedIdentityCredential
+              spec:
+                forProvider:
+                  audience:
+                    - api://AzureADTokenExchange
+                  subject: "system:serviceaccount:upbound-system:upbound-provider-gcp-compute"
+            patches:
+              - type: PatchSet
+                patchSetName: providerConfigRef
+              - type: PatchSet
+                patchSetName: deletionPolicy
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.id
+                toFieldPath: spec.forProvider.resourceGroupNameSelector.matchLabels[azure.platform.upbound.io/network-id]
+              - type: FromCompositeFieldPath
+                fromFieldPath: status.aks.oidcIssuerUrl
+                toFieldPath: spec.forProvider.issuer
+                policy:
+                  fromFieldPath: Required
+              - type: FromCompositeFieldPath
+                fromFieldPath: status.aks.userAssignedIdentityId
+                toFieldPath: spec.forProvider.parentId
+                policy:
+                  fromFieldPath: Required
+
+          - name: gcp-configmap
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: ConfigMap
+                    metadata:
+                      name: gcp-default-credentials
+                      namespace: upbound-system
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.id
+                toFieldPath: spec.providerConfigRef.name
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: spec.parameters.gcp.projectId
+                    - fromFieldPath: spec.parameters.gcp.workloadIdentityPoolName
+                    - fromFieldPath: spec.parameters.gcp.serviceAccountName
+                    - fromFieldPath: spec.parameters.gcp.serviceAccountName
+                    - fromFieldPath: spec.parameters.gcp.projectName
+                  strategy: string
+                  string:
+                    fmt: |
+                      {
+                        "universe_domain": "googleapis.com",
+                        "type": "external_account",
+                        "audience": "//iam.googleapis.com/projects/%s/locations/global/workloadIdentityPools/%s/providers/%s",
+                        "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+                        "token_url": "https://sts.googleapis.com/v1/token",
+                        "service_account_impersonation_url": "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/%s@%s.iam.gserviceaccount.com:generateAccessToken",
+                        "credential_source": {
+                          "file": "/var/run/secrets/azure/tokens/azure-identity-token",
+                          "format": {
+                            "type": "text"
+                          }
+                        }
+                      }
+                toFieldPath: spec.forProvider.manifest.data[gcp_default_credentials.json]
+
+          - name: gcp-providerconfig
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                forProvider:
+                  manifest:
+                    apiVersion: gcp.upbound.io/v1beta1
+                    kind: ProviderConfig
+                    metadata:
+                      name: default
+                    spec:
+                      credentials:
+                        source: ImpersonateServiceAccount
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.id
+                toFieldPath: spec.providerConfigRef.name
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.gcp.projectName
+                toFieldPath: spec.forProvider.manifest.spec.projectID
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: spec.parameters.gcp.serviceAccountName
+                    - fromFieldPath: spec.parameters.gcp.projectName
+                  strategy: string
+                  string:
+                    fmt: "%s@%s.iam.gserviceaccount.com"
+                toFieldPath: spec.forProvider.manifest.spec.credentials.impersonateServiceAccount.name
+
+    - step: ordered-creation
+      functionRef:
+        name: crossplane-contrib-function-sequencer
+      input:
+        apiVersion: template.fn.crossplane.io/v1beta1
+        kind: Input
+        rules:
+          - sequence:
+              - kubernetesCluster
+              - crossplane
+          - sequence:
+              - kubernetesCluster
+              - gcp-configmap
+          - sequence:
+              - kubernetesCluster
+              - provider
+          - sequence:
+              - kubernetesCluster
+              - drc
+          - sequence:
+              - kubernetesCluster
+              - gcp-providerconfig
