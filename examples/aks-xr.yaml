@@ -1,10 +1,10 @@
 apiVersion: azure.platform.upbound.io/v1alpha1
 kind: XAKS
 metadata:
-  name: cfg-azure-assume-aws
+  name: cfg-azure-assume-gcp
 spec:
   parameters:
-    id: cfg-azure-assume-aws
+    id: cfg-azure-assume-gcp
     region: westus
     version: "1.28"
     nodes:
@@ -12,9 +12,9 @@ spec:
       instanceType: Standard_B2s
     gcp:
       projectName: crossplane-playground
-      projectId: "283222062215"
+      projectId: "123456789101"
       workloadIdentityPoolName: configuration-azure-assume-gcp
       serviceAccountName: configuration-azure-assume-gcp
   writeConnectionSecretToRef:
-    name: cfg-azure-assume-aws-kubeconfig
+    name: cfg-azure-assume-gcp-kubeconfig
     namespace: upbound-system

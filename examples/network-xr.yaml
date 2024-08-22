@@ -1,8 +1,8 @@
 apiVersion: azure.platform.upbound.io/v1alpha1
 kind: XNetwork
 metadata:
-  name: cfg-azure-assume-aws
+  name: cfg-azure-assume-gcp
 spec:
   parameters:
-    id: cfg-azure-assume-aws
+    id: cfg-azure-assume-gcp
     region: westus

@@ -96,8 +96,8 @@ spec:
                   description: Freeform field containing status information for aks
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
-                aws:
-                  description: Freeform field containing status information for aws
+                gcp:
+                  description: Freeform field containing status information for gcp
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
               type: object
